@@ -1,0 +1,8 @@
+node_modules
+
+
+This file tells Git to completely ignore the `node_modules` folder, which is exactly what we want.
+
+### **Final Repository Structure**
+
+After creating the `.gitignore` file, the complete structure of the project that you will upload to GitHub should look exactly like this:
