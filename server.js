@@ -11,17 +11,18 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- Production-Ready: Using Environment Variables for Secrets ---
-// We will set these variables in our hosting environment (Render)
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const MONGO_CONNECTION_STRING = process.env.MONGO_CONNECTION_STRING;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'a default secret for local development';
-// ----------------------------------------------------------------
+
+// --- CRITICAL FIX FOR HTTPS ---
+// This tells our app to trust the Render proxy server and generate secure https links.
+app.set('trust proxy', 1);
+// ------------------------------
 
 if (!GOOGLE_CLIENT_ID || !MONGO_CONNECTION_STRING) {
-    console.error("\n*** ERROR: Missing critical environment variables. Make sure GOOGLE_CLIENT_ID and MONGO_CONNECTION_STRING are set. ***\n");
-    // In a real production environment, you might not want to exit, but for this project it's a clear indicator.
-    // process.exit(1); 
+    console.error("\n*** ERROR: Missing critical environment variables. ***\n");
 }
 
 const client = new MongoClient(MONGO_CONNECTION_STRING);
@@ -33,7 +34,7 @@ const sessionMiddleware = session({
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: 'auto' } // 'auto' is good for Render's proxy
+    cookie: { secure: 'auto' }
 });
 app.use(express.json());
 app.use(sessionMiddleware);
@@ -44,11 +45,10 @@ io.engine.use(sessionMiddleware);
 passport.use(new GoogleStrategy({
     clientID: GOOGLE_CLIENT_ID, clientSecret: GOOGLE_CLIENT_SECRET, callbackURL: "/auth/google/callback"
 }, async (accessToken, refreshToken, profile, done) => {
-    // ... (The rest of the passport logic is identical to before)
     let user = await usersCollection.findOne({ googleId: profile.id });
     if (!user) {
         const result = await usersCollection.insertOne({
-            googleId: profile.id, displayName: profile.displayName, customUsername: profile.displayName, wins: 0, createdAt: new Date()
+            googleId: profile.id, displayName: profile.displayName, customUsername: profile.displayName, wins: 0, createdAt: new date()
         });
         user = await usersCollection.findOne({ _id: result.insertedId });
     }
@@ -71,8 +71,7 @@ app.get('/auth/logout', (req, res) => {
 app.get('/api/user', (req, res) => req.isAuthenticated() ? res.json(req.user) : res.status(401).json({ message: 'Not Authenticated' }));
 app.use(express.static('public'));
 
-// --- Socket.IO Connections ---
-// ... (The entire io.on('connection', ...) block is identical to before)
+// --- Socket.IO Connections are unchanged ---
 io.on('connection', async (socket) => {
     const user = await getSocketUser(socket);
     if (user) {
@@ -172,7 +171,6 @@ io.on('connection', async (socket) => {
 
 
 async function getSocketUser(socket) {
-    // ... (This function is identical to before)
     const session = socket.request.session;
     if (session && session.passport && session.passport.user) {
         const userId = session.passport.user;
@@ -181,7 +179,6 @@ async function getSocketUser(socket) {
     return null;
 }
 
-// --- Dynamic Port for Hosting ---
 const PORT = process.env.PORT || 3000;
 
 async function main() {

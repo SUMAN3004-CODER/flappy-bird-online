@@ -1,166 +1,376 @@
+// --- Establish connection to the server ---
 const socket = io();
 
-// --- Global State ---
-let currentUser = null, gameLoopId, singlePlayerDifficulty = 'easy';
-let friends = [], onlineFriendIds = [];
-let currentGameState = { bird: null, pipes: [], score: 0, gameOver: false, frame: 0, mode: 'single', gameId: null };
+// --- Game State & Settings ---
+let gameLoopId;
+let currentUser = null;
+let currentGameState = {
+    bird: null, pipes: [], score: 0, gameOver: false, frame: 0,
+    mode: 'single', gameId: null, opponentName: null, difficulty: 'medium',
+    countdown: 3, gameStarted: false
+};
+let gameSettings = {
+    jumpLevel: 7, // Default jump level (Normal)
+    darkMode: false
+};
 
 // --- UI Elements ---
-const screens = { loading: document.getElementById('loading-screen'), login: document.getElementById('login-screen'), mainMenu: document.getElementById('main-menu-screen'), multiplayerLobby: document.getElementById('multiplayer-lobby-screen'), game: document.getElementById('game-screen') };
-const welcomeMessage = document.getElementById('welcome-message'), userIdDisplay = document.getElementById('user-id-display');
-const canvas = document.getElementById('gameCanvas'), ctx = canvas.getContext('2d');
-const sounds = { flap: document.getElementById('flap-sound'), score: document.getElementById('score-sound'), gameOver: document.getElementById('gameover-sound') };
-const difficultyModal = document.getElementById('difficulty-modal');
-
-// --- Game Physics Configuration ---
-const difficulties = {
-    easy:   { BIRD_GRAVITY: 0.3, BIRD_LIFT: -6.5, PIPE_GAP: 180, PIPE_SPEED: 3 },
-    medium: { BIRD_GRAVITY: 0.4, BIRD_LIFT: -7.0, PIPE_GAP: 160, PIPE_SPEED: 4 },
-    hard:   { BIRD_GRAVITY: 0.5, BIRD_LIFT: -7.5, PIPE_GAP: 140, PIPE_SPEED: 5 }
+const screens = {
+    loading: document.getElementById('loading-screen'),
+    login: document.getElementById('login-screen'),
+    mainMenu: document.getElementById('main-menu-screen'),
+    multiplayerLobby: document.getElementById('multiplayer-lobby-screen'),
+    game: document.getElementById('game-screen'),
 };
-let GAME_CONFIG = {};
-function updateGameConstants(height, difficulty = 'medium') {
-    const scale = height / 800;
-    const config = difficulties[difficulty];
-    GAME_CONFIG.BIRD_RADIUS = 15 * scale;
-    GAME_CONFIG.PIPE_WIDTH = 80 * scale;
-    GAME_CONFIG.BIRD_GRAVITY = config.BIRD_GRAVITY * scale;
-    GAME_CONFIG.BIRD_LIFT = config.BIRD_LIFT * scale;
-    GAME_CONFIG.PIPE_GAP = config.PIPE_GAP * scale;
-    GAME_CONFIG.PIPE_SPEED = config.PIPE_SPEED * scale;
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const countdownOverlay = document.getElementById('countdown-overlay');
+
+// --- Utility Functions ---
+function showScreen(screenName) {
+    Object.values(screens).forEach(screen => screen.classList.remove('active'));
+    if (screens[screenName]) screens[screenName].classList.add('active');
 }
 
-// --- Utility & UI Functions ---
-function showScreen(screenName) { Object.values(screens).forEach(s => s.classList.remove('active')); if(screens[screenName]) screens[screenName].classList.add('active'); document.body.classList.toggle('p-4', screenName !== 'game'); }
-function checkLoginStatus() { fetch('/api/user').then(res => res.ok ? res.json().then(handleLoginSuccess) : showLoginScreen()).catch(err => { console.error("API error:", err); showLoginScreen(); }); }
-function showLoginScreen() { showScreen('login'); screens.loading.classList.remove('active'); }
-
-function handleLoginSuccess(user) {
-    currentUser = user;
-    welcomeMessage.textContent = `Welcome, ${user.customUsername || user.displayName}!`;
-    userIdDisplay.textContent = user._id;
-    showScreen('mainMenu');
-    screens.loading.classList.remove('active');
-    document.getElementById('logout-btn').href = user.isGuest ? '#' : '/auth/logout';
-    if (!user.isGuest) socket.emit('requestInitialData');
+// --- Settings Management ---
+function saveSettings() {
+    localStorage.setItem('flappyBirdSettings', JSON.stringify(gameSettings));
 }
 
-// --- Event Listeners ---
-socket.on('connect', () => { console.log('Socket.IO connected.'); checkLoginStatus(); });
-document.getElementById('guest-login-btn').addEventListener('click', () => socket.emit('guestLogin'));
-socket.on('loginSuccess', handleLoginSuccess);
+function loadSettings() {
+    const saved = localStorage.getItem('flappyBirdSettings');
+    if (saved) {
+        gameSettings = JSON.parse(saved);
+        // Apply settings
+        document.getElementById('dark-mode-toggle').checked = gameSettings.darkMode;
+        document.body.classList.toggle('dark-mode', gameSettings.darkMode);
+        
+        const jumpSlider = document.getElementById('jump-level-slider');
+        jumpSlider.value = gameSettings.jumpLevel;
+        updateJumpLevelDisplay(gameSettings.jumpLevel);
+    }
+}
 
-document.getElementById('logout-btn').addEventListener('click', (e) => { if (currentUser && currentUser.isGuest) { e.preventDefault(); window.location.reload(); } });
+function updateJumpLevelDisplay(value) {
+    const display = document.getElementById('jump-level-value');
+    const numericValue = Number(value);
+    if (numericValue < 6) display.textContent = 'Weak';
+    else if (numericValue < 8) display.textContent = 'Normal';
+    else display.textContent = 'Strong';
+}
 
-// --- Multiplayer Lobby ---
-document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', (e) => {
-    document.querySelector('.tab-btn.active').classList.remove('active');
-    e.target.classList.add('active');
-    document.querySelector('.tab-content.active').classList.remove('active');
-    document.getElementById(e.target.dataset.tab + '-tab').classList.add('active');
-    if (e.target.dataset.tab === 'leaderboards' && currentUser && !currentUser.isGuest) socket.emit('getLeaderboards');
-}));
-
-document.getElementById('add-friend-btn').addEventListener('click', () => {
-    const friendId = document.getElementById('add-friend-input').value;
-    if (friendId) socket.emit('addFriend', friendId);
+// --- Socket.IO Event Listeners ---
+socket.on('connect', () => {
+    fetch('/api/user').then(res => res.json()).then(user => {
+        if (user && user._id) {
+            currentUser = user;
+            if (!user.customUsername) {
+                document.getElementById('username-modal').style.display = 'flex';
+            } else {
+                showMainMenu();
+            }
+        } else {
+            showScreen('login');
+        }
+        screens.loading.classList.remove('active');
+    }).catch(() => showScreen('login'));
 });
 
-socket.on('friendsList', ({ friends: f, onlineFriendIds: o }) => { friends = f; onlineFriendIds = o; renderFriendsList(); });
-socket.on('friendAdded', (newFriend) => { friends.push(newFriend); renderFriendsList(); });
-
-function renderFriendsList() {
-    const listEl = document.getElementById('friends-list');
-    if (!currentUser || currentUser.isGuest) { listEl.innerHTML = `<p class="text-gray-500">Login with Google to add friends.</p>`; return; }
-    if (friends.length === 0) { listEl.innerHTML = `<p class="text-gray-500">No friends yet. Add one!</p>`; return; }
-    listEl.innerHTML = friends.map(friend => {
-        const isOnline = onlineFriendIds.includes(friend._id.toString());
-        return `<div class="flex justify-between items-center p-2 border-b">
-            <span>${friend.customUsername} <span class="text-xs ${isOnline ? 'text-green-500' : 'text-gray-400'}">${isOnline ? '● Online' : '○ Offline'}</span></span>
-            ${isOnline ? `<button class="invite-btn text-xs bg-blue-500 text-white px-2 py-1 rounded" data-id="${friend._id}">Invite</button>` : ''}
-        </div>`;
-    }).join('');
-}
-document.getElementById('friends-list').addEventListener('click', e => { if (e.target.classList.contains('invite-btn')) { socket.emit('sendInvite', { toUserId: e.target.dataset.id }); alert('Invite sent!'); } });
+socket.on('loginSuccess', (user) => {
+    currentUser = user;
+    showMainMenu();
+});
 
 socket.on('inviteReceived', ({ fromId, fromName }) => {
     const modal = document.getElementById('invite-modal');
-    document.getElementById('invite-from-text').textContent = `${fromName} invited you to play!`;
+    document.getElementById('invite-from-text').textContent = `${fromName} has invited you to play!`;
     modal.style.display = 'flex';
-    document.getElementById('accept-invite-btn').onclick = () => { socket.emit('acceptInvite', fromId); modal.style.display = 'none'; };
-    document.getElementById('decline-invite-btn').onclick = () => { modal.style.display = 'none'; };
+    document.getElementById('accept-invite-btn').onclick = () => {
+        socket.emit('acceptInvite', fromId);
+        modal.style.display = 'none';
+    };
+    document.getElementById('decline-invite-btn').onclick = () => modal.style.display = 'none';
 });
 
 socket.on('showDifficultySelect', ({ gameId }) => {
-    difficultyModal.dataset.gameId = gameId;
-    document.getElementById('my-difficulty-choice').textContent = 'Waiting...';
-    document.getElementById('opponent-difficulty-choice').textContent = 'Waiting...';
-    difficultyModal.style.display = 'flex';
-});
-
-document.getElementById('difficulty-choices').addEventListener('click', e => {
-    if (e.target.dataset.difficulty) {
-        const gameId = difficultyModal.dataset.gameId;
-        const difficulty = e.target.dataset.difficulty;
-        socket.emit('difficultySelected', { gameId, difficulty });
-    }
+    currentGameState.gameId = gameId;
+    document.getElementById('difficulty-modal').style.display = 'flex';
+    document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty!';
 });
 
 socket.on('updateDifficultyChoices', ({ myChoice, opponentChoice, opponentName }) => {
-    document.getElementById('my-difficulty-choice').textContent = myChoice || 'Waiting...';
-    document.getElementById('opponent-difficulty-choice').textContent = opponentChoice || 'Waiting...';
-    document.getElementById('opponent-name').textContent = opponentName;
+    const text = `You: ${myChoice || '...'} | ${opponentName}: ${opponentChoice || '...'}`;
+    document.getElementById('difficulty-status-text').textContent = text;
 });
 
-
-// --- Settings ---
-document.getElementById('dark-mode-toggle').addEventListener('change', e => document.body.classList.toggle('dark', e.target.checked));
-document.getElementById('difficulty-selection').addEventListener('change', e => { singlePlayerDifficulty = e.target.value; });
-
-// --- Leaderboards ---
-socket.on('leaderboards', ({ singlePlayer, multiPlayer }) => { /* ... leaderboard rendering logic ... */ });
-
-// --- Game Start/End ---
 socket.on('gameStart', ({ gameId, opponentName, difficulty }) => {
-    difficultyModal.style.display = 'none';
+    document.getElementById('difficulty-modal').style.display = 'none';
     startMultiplayerGame(gameId, opponentName, difficulty);
 });
+
 socket.on('opponentScoreUpdate', score => document.getElementById('opponent-score').textContent = score);
-document.getElementById('single-player-btn').addEventListener('click', () => startSinglePlayerGame());
-document.getElementById('multiplayer-btn').addEventListener('click', () => showScreen('multiplayerLobby'));
-document.getElementById('lobby-back-btn').addEventListener('click', () => showScreen('mainMenu'));
-document.getElementById('game-back-btn').addEventListener('click', () => { stopGame(); showScreen('mainMenu'); });
-document.getElementById('restart-btn').addEventListener('click', () => { if (currentGameState.mode === 'single') startSinglePlayerGame(); else { stopGame(); showScreen('mainMenu'); } });
-userIdDisplay.addEventListener('click', (e) => navigator.clipboard.writeText(e.target.textContent).then(() => alert('ID Copied!')));
+socket.on('friendAdded', friend => addFriendToList(friend, true));
+socket.on('friendsList', ({ friends, onlineFriendIds }) => {
+    document.getElementById('friends-list').innerHTML = '';
+    friends.forEach(friend => addFriendToList(friend, onlineFriendIds.includes(friend._id.toString())));
+});
+socket.on('leaderboards', ({ singlePlayer, multiPlayer }) => {
+    const spList = document.getElementById('single-player-leaderboard');
+    spList.innerHTML = singlePlayer.map(s => `<li>${s.username}: ${s.score}</li>`).join('') || '<li>No scores yet.</li>';
+    const mpList = document.getElementById('multiplayer-leaderboard');
+    mpList.innerHTML = multiPlayer.map(p => `<li>${p.customUsername}: ${p.wins} wins</li>`).join('') || '<li>No wins yet.</li>';
+});
+
+// --- Main Menu and Lobby Logic ---
+function showMainMenu() {
+    document.getElementById('welcome-message').textContent = `Welcome, ${currentUser.customUsername}!`;
+    document.getElementById('user-id-display').textContent = currentUser._id;
+    showScreen('main-menu');
+}
+
+document.getElementById('guest-login-btn').addEventListener('click', () => socket.emit('guestLogin'));
+
+document.getElementById('set-username-btn').addEventListener('click', () => {
+    const username = document.getElementById('username-input').value.trim();
+    if (username && username.length > 2) {
+        socket.emit('setUsername', username);
+        document.getElementById('username-modal').style.display = 'none';
+    } else { alert('Username must be at least 3 characters.'); }
+});
+
+document.getElementById('multiplayer-btn').addEventListener('click', () => {
+    showScreen('multiplayer-lobby');
+    document.querySelector('.tab-btn[data-tab="friends"]').click();
+    socket.emit('getLeaderboards');
+    socket.emit('requestInitialData');
+});
+
+document.getElementById('lobby-back-btn').addEventListener('click', () => showScreen('main-menu'));
+
+// Tab Switching
+document.querySelectorAll('.tab-btn').forEach(button => {
+    button.addEventListener('click', () => {
+        const tab = button.dataset.tab;
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`${tab}-tab`).classList.add('active');
+        button.classList.add('active');
+    });
+});
+
+// --- Friends Logic ---
+document.getElementById('add-friend-btn').addEventListener('click', () => {
+    const friendId = document.getElementById('add-friend-input').value.trim();
+    if (friendId) socket.emit('addFriend', friendId);
+    document.getElementById('add-friend-input').value = '';
+});
+
+function addFriendToList(friend, isOnline) {
+    const list = document.getElementById('friends-list');
+    const friendDiv = document.createElement('div');
+    friendDiv.className = 'flex justify-between items-center p-2 rounded';
+    friendDiv.innerHTML = `
+        <span>${friend.customUsername}</span>
+        <button class="invite-btn btn btn-sm py-1 px-2 ${isOnline ? 'btn-green' : 'bg-gray-500'}" 
+                data-id="${friend._id}" ${!isOnline ? 'disabled' : ''}>
+            ${isOnline ? 'Invite' : 'Offline'}
+        </button>
+    `;
+    list.appendChild(friendDiv);
+    friendDiv.querySelector('.invite-btn').addEventListener('click', (e) => {
+        socket.emit('sendInvite', { toUserId: e.target.dataset.id });
+        alert('Invite sent!');
+    });
+}
 
 // --- Game Logic ---
-const BIRD = { x: 100, y: 150, velocity: 0, draw() { ctx.beginPath(); ctx.arc(this.x, this.y, GAME_CONFIG.BIRD_RADIUS, 0, Math.PI * 2); ctx.fillStyle = "#FFD700"; ctx.fill(); }, update() { this.velocity += GAME_CONFIG.BIRD_GRAVITY; this.y += this.velocity; if (this.y + GAME_CONFIG.BIRD_RADIUS > canvas.height || this.y - GAME_CONFIG.BIRD_RADIUS < 0) currentGameState.gameOver = true; }, flap() { this.velocity = GAME_CONFIG.BIRD_LIFT; sounds.flap.currentTime=0; sounds.flap.play(); } };
-const PIPE = { draw(p) { ctx.fillStyle = "#008000"; ctx.fillRect(p.x, 0, GAME_CONFIG.PIPE_WIDTH, p.top); ctx.fillRect(p.x, canvas.height - p.bottom, GAME_CONFIG.PIPE_WIDTH, p.bottom); } };
+const BIRD = { x: 100, y: 150, radius: 15, gravity: 0.4, lift: -7, velocity: 0,
+    draw() { ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI); ctx.fillStyle = "#FFD700"; ctx.fill(); ctx.closePath(); },
+    update() { this.velocity += this.gravity; this.y += this.velocity; }
+};
 
-function resetGameState() { currentGameState = { ...currentGameState, bird: { ...BIRD, y: canvas.height / 2, x: canvas.width / 4 }, pipes: [], score: 0, gameOver: false, frame: 0 }; document.getElementById('game-over-message').style.display = 'none'; }
-function startSinglePlayerGame() { resizeCanvas(); updateGameConstants(canvas.height, singlePlayerDifficulty); resetGameState(); currentGameState.mode = 'single'; document.getElementById('local-score').textContent = 0; document.getElementById('opponent-score-display').classList.add('hidden'); showScreen('game'); gameLoop(); }
-function startMultiplayerGame(gameId, opponentName, difficulty) { resizeCanvas(); updateGameConstants(canvas.height, difficulty); resetGameState(); currentGameState.mode = 'multi'; currentGameState.gameId = gameId; document.getElementById('local-score').textContent = 0; const oppScore = document.getElementById('opponent-score-display'); oppScore.classList.remove('hidden'); oppScore.childNodes[0].nodeValue = `${opponentName}: `; oppScore.querySelector('span').textContent = 0; showScreen('game'); gameLoop(); }
-function stopGame() { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
+let PIPE = { gap: 200, width: 60, speed: 3,
+    draw(pipe) { ctx.fillStyle = "#008000"; ctx.fillRect(pipe.x, 0, this.width, pipe.top); ctx.fillRect(pipe.x, canvas.height - pipe.bottom, this.width, pipe.bottom); }
+};
+
+function setDifficulty(difficulty) {
+    currentGameState.difficulty = difficulty;
+    switch (difficulty) {
+        case 'easy': PIPE = { ...PIPE, speed: 2, gap: 250 }; break;
+        case 'hard': PIPE = { ...PIPE, speed: 4, gap: 180 }; break;
+        default: PIPE = { ...PIPE, speed: 3, gap: 200 }; break;
+    }
+}
+
+function resetGameState() {
+    currentGameState.bird = { ...BIRD, y: canvas.height / 2, lift: -gameSettings.jumpLevel };
+    currentGameState.pipes = [];
+    currentGameState.score = 0;
+    currentGameState.gameOver = false;
+    currentGameState.frame = 0;
+    currentGameState.gameStarted = false;
+    currentGameState.countdown = 3;
+    document.getElementById('local-score').textContent = 0;
+    document.getElementById('game-over-message').style.display = 'none';
+}
+
+function beginGameCountdown() {
+    resetGameState();
+    showScreen('game');
+    resizeCanvas();
+    currentGameState.bird.draw(); // Draw the initial bird
+    
+    countdownOverlay.textContent = currentGameState.countdown;
+    countdownOverlay.style.display = 'flex';
+
+    const countdownInterval = setInterval(() => {
+        currentGameState.countdown--;
+        if (currentGameState.countdown > 0) {
+            countdownOverlay.textContent = currentGameState.countdown;
+        } else {
+            clearInterval(countdownInterval);
+            countdownOverlay.style.display = 'none';
+            currentGameState.gameStarted = true;
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+    }, 1000);
+}
+
+document.getElementById('single-player-btn').addEventListener('click', () => {
+    currentGameState.mode = 'single';
+    document.getElementById('opponent-score-display').classList.add('hidden');
+    // For single player, we get difficulty from settings, but for simplicity, we use the difficulty modal here too.
+    document.getElementById('difficulty-modal').style.display = 'flex';
+    document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty for this round!';
+});
+
+function startMultiplayerGame(gameId, opponentName, difficulty) {
+    currentGameState.mode = 'multi';
+    currentGameState.gameId = gameId;
+    currentGameState.opponentName = opponentName;
+    setDifficulty(difficulty);
+    document.getElementById('opponent-score').textContent = 0;
+    document.getElementById('opponent-score-display').classList.remove('hidden');
+    beginGameCountdown();
+}
+
+function stopGame() {
+    if (gameLoopId) cancelAnimationFrame(gameLoopId);
+    gameLoopId = null;
+}
 
 function gameLoop() {
-    if (currentGameState.gameOver) { sounds.gameOver.play(); socket.emit('gameOver', { score: currentGameState.score, mode: currentGameState.mode }); document.getElementById('game-over-message').style.display = 'flex'; stopGame(); return; }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    currentGameState.bird.update();
-    if (currentGameState.frame % 90 === 0) { const topHeight = Math.random() * (canvas.height - GAME_CONFIG.PIPE_GAP - 200) + 100; currentGameState.pipes.push({ x: canvas.width, top: topHeight, bottom: canvas.height - topHeight - GAME_CONFIG.PIPE_GAP, passed: false }); }
-    for (let i = currentGameState.pipes.length - 1; i >= 0; i--) {
-        let p = currentGameState.pipes[i]; p.x -= GAME_CONFIG.PIPE_SPEED; PIPE.draw(p);
-        if (currentGameState.bird.x + GAME_CONFIG.BIRD_RADIUS > p.x && currentGameState.bird.x - GAME_CONFIG.BIRD_RADIUS < p.x + GAME_CONFIG.PIPE_WIDTH) { if (currentGameState.bird.y - GAME_CONFIG.BIRD_RADIUS < p.top || currentGameState.bird.y + GAME_CONFIG.BIRD_RADIUS > canvas.height - p.bottom) currentGameState.gameOver = true; }
-        if (!p.passed && p.x + GAME_CONFIG.PIPE_WIDTH < currentGameState.bird.x) { currentGameState.score++; p.passed = true; document.getElementById('local-score').textContent = currentGameState.score; sounds.score.currentTime=0; sounds.score.play(); if (currentGameState.mode === 'multi') socket.emit('scoreUpdate', { gameId: currentGameState.gameId, score: currentGameState.score }); }
-        if (p.x + GAME_CONFIG.PIPE_WIDTH < 0) currentGameState.pipes.splice(i, 1);
+    if (currentGameState.gameOver) {
+        let won = false;
+        if (currentGameState.mode === 'multi') {
+            const myScore = currentGameState.score;
+            const opponentScore = parseInt(document.getElementById('opponent-score').textContent);
+            won = myScore > opponentScore;
+            document.getElementById('game-over-text').textContent = won ? "You Win!" : "You Lose!";
+        } else {
+            document.getElementById('game-over-text').textContent = "Game Over";
+        }
+        document.getElementById('game-over-message').style.display = 'flex';
+        socket.emit('gameOver', { score: currentGameState.score, mode: currentGameState.mode, won });
+        stopGame();
+        return;
     }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Only update bird if game has started
+    if (currentGameState.gameStarted) {
+        currentGameState.bird.update();
+    }
+    
+    // Check for game over
+    if (currentGameState.bird.y + currentGameState.bird.radius > canvas.height || currentGameState.bird.y - currentGameState.bird.radius < 0) {
+        currentGameState.gameOver = true;
+    }
+    
+    // Pipes Logic
+    if (currentGameState.gameStarted) {
+        if (currentGameState.frame % 100 === 0) {
+            const top = Math.random() * (canvas.height - PIPE.gap - 100) + 50;
+            const bottom = canvas.height - top - PIPE.gap;
+            currentGameState.pipes.push({ x: canvas.width, top, bottom, passed: false });
+        }
+
+        for (let i = currentGameState.pipes.length - 1; i >= 0; i--) {
+            let p = currentGameState.pipes[i];
+            p.x -= PIPE.speed;
+
+            if (p.x + PIPE.width < 0) {
+                currentGameState.pipes.splice(i, 1);
+                continue;
+            }
+
+            if (currentGameState.bird.x + currentGameState.bird.radius > p.x && currentGameState.bird.x - currentGameState.bird.radius < p.x + PIPE.width &&
+                (currentGameState.bird.y - currentGameState.bird.radius < p.top || currentGameState.bird.y + currentGameState.bird.radius > canvas.height - p.bottom)) {
+                currentGameState.gameOver = true;
+            }
+
+            if (!p.passed && p.x + PIPE.width < currentGameState.bird.x) {
+                currentGameState.score++;
+                p.passed = true;
+                document.getElementById('local-score').textContent = currentGameState.score;
+                if (currentGameState.mode === 'multi') {
+                    socket.emit('scoreUpdate', currentGameState.score);
+                }
+            }
+            PIPE.draw(p);
+        }
+    }
+
     currentGameState.bird.draw();
     currentGameState.frame++;
     gameLoopId = requestAnimationFrame(gameLoop);
 }
 
-function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; updateGameConstants(canvas.height, singlePlayerDifficulty); }
+// --- Event Listeners & Initializers ---
+document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !currentGameState.gameOver && gameLoopId) currentGameState.bird.flap();
+});
+canvas.addEventListener('click', () => {
+    if (!currentGameState.gameOver && gameLoopId) currentGameState.bird.flap();
+});
+document.getElementById('game-back-btn').addEventListener('click', () => { stopGame(); showScreen('main-menu'); });
+
+document.querySelectorAll('.difficulty-btn').forEach(button => {
+    button.addEventListener('click', (e) => {
+        const difficulty = e.target.dataset.difficulty;
+        if (currentGameState.mode === 'single') {
+            document.getElementById('difficulty-modal').style.display = 'none';
+            setDifficulty(difficulty);
+            beginGameCountdown();
+        } else {
+            socket.emit('difficultySelected', { gameId: currentGameState.gameId, difficulty });
+        }
+    });
+});
+
+document.getElementById('dark-mode-toggle').addEventListener('change', (e) => {
+    gameSettings.darkMode = e.target.checked;
+    document.body.classList.toggle('dark-mode', gameSettings.darkMode);
+    saveSettings();
+});
+
+document.getElementById('jump-level-slider').addEventListener('input', (e) => {
+    gameSettings.jumpLevel = e.target.value;
+    updateJumpLevelDisplay(e.target.value);
+    saveSettings();
+});
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
 window.addEventListener('resize', resizeCanvas);
-document.addEventListener('keydown', (e) => { if (e.code === 'Space' && !currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
-canvas.addEventListener('click', () => { if (!currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
-window.onload = () => { resizeCanvas(); };
+
+// Initialize
+window.onload = () => {
+    loadSettings();
+    showScreen('loading');
+};
 

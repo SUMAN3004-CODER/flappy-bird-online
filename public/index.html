@@ -7,96 +7,207 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
-        body{font-family:'Press Start 2P',cursive;background-color:#87ceeb;overflow:hidden;color:#1a202c}.screen{display:none}.active{display:flex}.btn{background-color:#4caf50;border:none;color:#fff;padding:15px 32px;text-align:center;text-decoration:none;display:inline-block;font-size:16px;margin:4px 2px;cursor:pointer;border-radius:8px;box-shadow:0 4px #999;transition:all .1s ease-in-out}.btn:active{box-shadow:0 2px #666;transform:translateY(2px)}.btn-google{background-color:#db4437}.btn-guest{background-color:#757575}.btn-logout{background-color:#f44336}.card{background-color:rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 16px rgba(0,0,0,.2);backdrop-filter:blur(5px);border:2px solid rgba(255,255,255,.9)}#gameCanvas{background-color:#87ceeb;display:block;width:100%;height:100%;}.modal{display:none;position:fixed;z-index:100;left:0;top:0;width:100%;height:100%;overflow:auto;background-color:rgba(0,0,0,.6);backdrop-filter:blur(5px)}.modal-content{background-color:#fefefe;margin:15% auto;padding:20px;border:1px solid #888;width:80%;max-width:500px;border-radius:16px}.tab-btn{border:none;background:none;padding:10px 15px;cursor:pointer;border-bottom:3px solid transparent}.tab-btn.active{border-bottom:3px solid #4CAF50}.tab-content{display:none}.tab-content.active{display:block}
-        /* Dark Mode Styles */
-        body.dark{background-color:#0d1117;color:#c9d1d9}body.dark #gameCanvas{background-color:#0d1117}body.dark .card{background-color:rgba(22,27,34,.8);border-color:rgba(139,148,158,.2)}body.dark .btn{background-color:#238636}body.dark .btn-logout{background-color:#da3633}body.dark .modal-content{background-color:#161b22}
+        :root {
+            --bg-color: #87CEEB; /* Sky blue */
+            --text-color: #1a202c;
+            --card-bg: rgba(255, 255, 255, 0.8);
+            --card-border: rgba(255, 255, 255, 0.9);
+            --btn-green: #4CAF50;
+            --btn-red: #f44336;
+        }
+        .dark-mode {
+            --bg-color: #0d1b2a;
+            --text-color: #e0e1dd;
+            --card-bg: rgba(26, 32, 44, 0.8);
+            --card-border: rgba(26, 32, 44, 0.9);
+        }
+        body {
+            font-family: 'Press Start G2', 'Press Start 2P', cursive;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+            overflow: hidden;
+        }
+        .screen { display: none; }
+        .active { display: flex; }
+        .btn {
+            border: none; color: white; padding: 15px 32px; text-align: center;
+            font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px;
+            box-shadow: 0 4px #999; transition: all 0.1s ease-in-out;
+        }
+        .btn:active { box-shadow: 0 2px #666; transform: translateY(2px); }
+        .btn-green { background-color: var(--btn-green); }
+        .btn-red { background-color: var(--btn-red); }
+        .btn-google { background-color: #DB4437; }
+        .btn-guest { background-color: #757575; }
+        .btn-logout { background-color: #f44336; }
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 16px; box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px); border: 2px solid var(--card-border);
+        }
+        #gameCanvas {
+            background-color: var(--bg-color);
+            display: block; width: 100%; height: 100%;
+        }
+        .modal {
+            display: none; position: fixed; z-index: 100; left: 0; top: 0;
+            width: 100%; height: 100%; overflow: auto;
+            background-color: rgba(0,0,0,0.6); backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background-color: var(--card-bg); margin: 15% auto; padding: 20px;
+            border: 2px solid var(--card-border); width: 80%; max-width: 500px; border-radius: 16px;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .tab-btn.active { border-bottom: 2px solid var(--btn-green); color: var(--text-color); }
+        .tab-btn { color: gray; }
+        /* Toggle Switch for Dark Mode */
+        .switch{position:relative;display:inline-block;width:60px;height:34px}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#ccc;transition:.4s}.slider:before{position:absolute;content:"";height:26px;width:26px;left:4px;bottom:4px;background-color:#fff;transition:.4s}input:checked+.slider{background-color:var(--btn-green)}input:checked+.slider:before{transform:translateX(26px)}.slider.round{border-radius:34px}.slider.round:before{border-radius:50%}
     </style>
 </head>
-<body class="w-screen h-screen flex items-center justify-center p-4">
-    <!-- Sound Effects -->
-    <audio id="flap-sound" src="https://www.soundjay.com/button/sounds/button-4.mp3" preload="auto"></audio>
-    <audio id="score-sound" src="https://www.soundjay.com/button/sounds/button-3.mp3" preload="auto"></audio>
-    <audio id="gameover-sound" src="https://www.soundjay.com/button/sounds/button-10.mp3" preload="auto"></audio>
+<body class="w-screen h-screen flex items-center justify-center p-0 md:p-4">
 
+    <!-- Loading Screen -->
     <div id="loading-screen" class="screen active flex-col items-center justify-center h-full w-full">
-        <h1 class="text-4xl mb-4">Flappy Bird</h1><p class="text-lg">Connecting...</p>
+        <h1 class="text-4xl mb-4">Loading...</h1>
     </div>
 
+    <!-- Login Screen -->
     <div id="login-screen" class="screen flex-col items-center justify-center h-full w-full">
         <div class="card p-8 text-center w-full max-w-sm">
-            <h1 class="text-4xl mb-6">Login</h1>
-            <a href="/auth/google" class="btn btn-google w-full mb-4">Login with Google</a>
+            <h1 class="text-4xl mb-6">Flappy Bird</h1>
+            <a href="/auth/google" class="btn btn-google w-full mb-4 block">Login with Google</a>
             <button id="guest-login-btn" class="btn btn-guest w-full">Continue as Guest</button>
         </div>
     </div>
-
+    
+    <!-- Username Modal -->
+    <div id="username-modal" class="modal">
+        <div class="modal-content text-center">
+            <h2 class="text-2xl mb-4">Set Your Username</h2>
+            <input id="username-input" type="text" placeholder="Enter username" class="w-full p-2 border rounded mb-4 text-center text-black">
+            <button id="set-username-btn" class="btn btn-green w-full">Save</button>
+        </div>
+    </div>
+    
+    <!-- Main Menu Screen -->
     <div id="main-menu-screen" class="screen flex-col items-center justify-center h-full w-full">
         <div class="card p-8 text-center w-full max-w-sm">
-            <h1 class="text-3xl mb-4" id="welcome-message">Main Menu</h1>
-            <p class="mb-2 text-xs">Your ID (for friends):</p>
-            <p id="user-id-display" class="mb-4 text-sm bg-gray-200 p-2 rounded break-all cursor-pointer" title="Click to copy">Login with Google to get an ID</p>
-            <button id="single-player-btn" class="btn w-full mb-4">Single Player</button>
-            <button id="multiplayer-btn" class="btn w-full">Multiplayer</button>
+            <h1 id="welcome-message" class="text-2xl mb-4">Welcome!</h1>
+            <p class="mb-2 text-xs">Your ID:</p>
+            <p id="user-id-display" class="mb-4 text-sm bg-gray-200 text-black p-2 rounded break-all cursor-pointer" title="Click to copy"></p>
+            <button id="single-player-btn" class="btn btn-green w-full mb-4">Single Player</button>
+            <button id="multiplayer-btn" class="btn btn-green w-full">Lobby / Settings</button>
         </div>
-        <a href="/auth/logout" id="logout-btn" class="btn btn-logout mt-6">Logout</a>
+        <a href="/auth/logout" class="btn btn-logout mt-4">Logout</a>
     </div>
 
+    <!-- Multiplayer Lobby Screen -->
     <div id="multiplayer-lobby-screen" class="screen flex-col items-center justify-center h-full w-full">
-        <div class="card p-6 text-center w-full max-w-2xl">
-            <div class="flex border-b justify-center">
-                <button class="tab-btn active" data-tab="my-friends">My Friends</button>
-                <button class="tab-btn" data-tab="add-friend">Add Friend</button>
-                <button class="tab-btn" data-tab="leaderboards">Leaderboards</button>
-                <button class="tab-btn" data-tab="settings">Settings</button>
+        <div class="card p-4 md:p-6 text-center w-full max-w-2xl">
+            <h1 class="text-3xl mb-4">Lobby</h1>
+            <div class="flex border-b mb-4 justify-center">
+                <button class="tab-btn flex-1 py-2" data-tab="friends">Friends</button>
+                <button class="tab-btn flex-1 py-2" data-tab="leaderboards">Leaderboards</button>
+                <button class="tab-btn flex-1 py-2" data-tab="settings">Settings</button>
+                <button class="tab-btn flex-1 py-2" data-tab="support">Support</button>
             </div>
-            <div class="mt-4">
-                <div id="my-friends-tab" class="tab-content active"><div id="friends-list" class="max-h-64 overflow-y-auto"></div></div>
-                <div id="add-friend-tab" class="tab-content">
-                    <input id="add-friend-input" type="text" placeholder="Enter Friend's ID" class="w-full p-2 border rounded mb-2 text-center">
-                    <button id="add-friend-btn" class="btn w-full">Send Friend Request</button>
-                </div>
-                <div id="leaderboards-tab" class="tab-content"><div id="leaderboard-content" class="max-h-64 overflow-y-auto"></div></div>
-                <div id="settings-tab" class="tab-content">
-                    <h2 class="text-xl mb-4">Game Settings</h2>
-                    <div class="flex items-center justify-center mb-6">
-                        <label for="dark-mode-toggle" class="mr-4">Dark Mode</label>
-                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                            <input type="checkbox" id="dark-mode-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
-                            <label for="dark-mode-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
-                        </div>
+            
+            <!-- Friends Tab -->
+            <div id="friends-tab" class="tab-content">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <h2 class="text-xl mb-2">My Friends</h2>
+                        <div id="friends-list" class="text-left max-h-48 overflow-y-auto bg-black bg-opacity-20 p-2 rounded"></div>
                     </div>
                     <div>
-                        <h3 class="text-lg mb-2">Single Player Difficulty</h3>
-                        <div id="difficulty-selection" class="flex justify-center space-x-4">
-                            <label><input type="radio" name="difficulty" value="easy" checked> Easy</label>
-                            <label><input type="radio" name="difficulty" value="medium"> Medium</label>
-                            <label><input type="radio" name="difficulty" value="hard"> Hard</label>
-                        </div>
+                        <h2 class="text-xl mb-2">Add a Friend</h2>
+                        <input id="add-friend-input" type="text" placeholder="Enter Friend's ID" class="w-full p-2 border rounded mb-2 text-center text-black">
+                        <button id="add-friend-btn" class="btn btn-green w-full">Add Friend</button>
                     </div>
                 </div>
             </div>
+
+            <!-- Leaderboards Tab -->
+            <div id="leaderboards-tab" class="tab-content">
+                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <h2 class="text-xl mb-2">Single Player High Scores</h2>
+                        <ol id="single-player-leaderboard" class="list-decimal list-inside text-left"></ol>
+                    </div>
+                    <div>
+                        <h2 class="text-xl mb-2">Multiplayer Wins</h2>
+                        <ol id="multiplayer-leaderboard" class="list-decimal list-inside text-left"></ol>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="settings-tab" class="tab-content">
+                <h2 class="text-xl mb-2">Game Settings</h2>
+                <div class="flex items-center justify-between my-4">
+                    <span>Dark Mode</span>
+                    <label class="switch"><input type="checkbox" id="dark-mode-toggle"><span class="slider round"></span></label>
+                </div>
+                <h3 class="text-lg font-bold mt-6 mb-2">Controls</h3>
+                <label for="jump-level-slider" class="block mb-1">Jump Strength: <span id="jump-level-value">Normal</span></label>
+                <input id="jump-level-slider" type="range" min="5" max="9" step="1" class="w-full">
+            </div>
+            
+            <!-- Support Tab -->
+            <div id="support-tab" class="tab-content">
+                <h2 class="text-xl mb-2">Contact Support</h2>
+                <p class="mt-4">For any issues or feedback, please email us at:</p>
+                <a href="mailto:webofficial0412@gmail.com" class="text-blue-400 hover:underline break-all">webofficial0412@gmail.com</a>
+            </div>
+
         </div>
         <button id="lobby-back-btn" class="btn mt-4">Back to Menu</button>
     </div>
 
-    <div id="game-screen" class="screen flex-col items-center justify-center h-full w-full">
-        <div class="w-full h-full relative">
-            <div id="scores" class="absolute top-0 left-0 right-0 flex justify-between p-4 text-white text-2xl z-10" style="text-shadow: 2px 2px 4px #000000;">
-                <p>You: <span id="local-score">0</span></p>
-                <p class="hidden" id="opponent-score-display">Friend: <span id="opponent-score">0</span></p>
-            </div>
-            <canvas id="gameCanvas"></canvas>
-            <div id="game-over-message" class="absolute inset-0 hidden flex-col items-center justify-center bg-black bg-opacity-50 z-20">
-                <p id="game-over-text" class="text-white text-4xl">Game Over</p>
-                <button id="restart-btn" class="btn mt-4">Play Again</button>
-                <button id="game-back-btn" class="btn mt-4">Main Menu</button>
+    <!-- Invite Modal -->
+    <div id="invite-modal" class="modal">
+        <div class="modal-content text-center">
+            <h2 class="text-2xl mb-4">Game Invite!</h2>
+            <p id="invite-from-text" class="mb-6"></p>
+            <div class="flex justify-around">
+                <button id="accept-invite-btn" class="btn btn-green">Accept</button>
+                <button id="decline-invite-btn" class="btn btn-red">Decline</button>
             </div>
         </div>
     </div>
     
-    <div id="invite-modal" class="modal"><div class="modal-content text-center"><h2 class="text-2xl mb-4">Game Invite!</h2><p id="invite-from-text" class="mb-6"></p><div class="flex justify-around"><button id="accept-invite-btn" class="btn">Accept</button><button id="decline-invite-btn" class="btn btn-logout">Decline</button></div></div></div>
-    <div id="difficulty-modal" class="modal"><div class="modal-content text-center"><h2 class="text-2xl mb-4">Choose Difficulty</h2><div id="difficulty-choices" class="flex justify-center space-x-4 mb-4"><button data-difficulty="easy" class="btn">Easy</button><button data-difficulty="medium" class="btn">Medium</button><button data-difficulty="hard" class="btn">Hard</button></div><div id="difficulty-status"><p>You: <span id="my-difficulty-choice">Waiting...</span></p><p id="opponent-name">Opponent</p>: <span id="opponent-difficulty-choice">Waiting...</span></div></div></div>
-    
+    <!-- Difficulty Select Modal -->
+    <div id="difficulty-modal" class="modal">
+        <div class="modal-content text-center">
+            <h2 class="text-2xl mb-4">Choose Difficulty</h2>
+            <div class="flex justify-around mb-4">
+                <button class="difficulty-btn btn btn-green" data-difficulty="easy">Easy</button>
+                <button class="difficulty-btn btn btn-green" data-difficulty="medium">Medium</button>
+                <button class="difficulty-btn btn btn-green" data-difficulty="hard">Hard</button>
+            </div>
+            <p id="difficulty-status-text">Waiting for players...</p>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen w-full h-full">
+        <div id="game-container" class="relative w-full h-full">
+            <canvas id="gameCanvas"></canvas>
+            <div id="scores" class="absolute top-0 left-0 right-0 flex justify-between p-4 text-white text-2xl md:text-4xl" style="text-shadow: 2px 2px 4px #000000;">
+                <p>Score: <span id="local-score">0</span></p>
+                <p class="hidden" id="opponent-score-display">Friend: <span id="opponent-score">0</span></p>
+            </div>
+            <div id="countdown-overlay" class="absolute inset-0 hidden flex-col items-center justify-center bg-black bg-opacity-50 text-white text-8xl md:text-9xl font-bold" style="text-shadow: 3px 3px 6px #000;"></div>
+            <div id="game-over-message" class="absolute inset-0 hidden flex-col items-center justify-center bg-black bg-opacity-50">
+                <p id="game-over-text" class="text-white text-4xl md:text-6xl"></p>
+                <button id="game-back-btn" class="btn btn-green mt-4">Main Menu</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="client.js"></script>
 </body>
