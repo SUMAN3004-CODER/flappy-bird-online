@@ -1,5 +1,10 @@
 // --- Establish connection to the server ---
+const loadingMessage = document.getElementById('loading-message');
+loadingMessage.textContent = '1. Client.js script started.';
+
 const socket = io();
+loadingMessage.textContent = '2. Connecting to server...';
+
 
 // --- Game State & Settings ---
 let gameLoopId;
@@ -61,7 +66,9 @@ function updateJumpLevelDisplay(value) {
 
 // --- Socket.IO Event Listeners ---
 socket.on('connect', () => {
+    loadingMessage.textContent = '3. Connected! Checking authentication...';
     fetch('/api/user').then(res => res.json()).then(user => {
+        loadingMessage.textContent = '4. Auth check complete.';
         if (user && user._id) {
             currentUser = user;
             if (!user.customUsername) {
@@ -73,7 +80,10 @@ socket.on('connect', () => {
             showScreen('login');
         }
         screens.loading.classList.remove('active');
-    }).catch(() => showScreen('login'));
+    }).catch((err) => {
+        loadingMessage.textContent = 'ERROR: Authentication failed. Check Render logs and Environment Variables.';
+        console.error("Auth fetch failed:", err);
+    });
 });
 
 socket.on('loginSuccess', (user) => {
@@ -186,7 +196,8 @@ function addFriendToList(friend, isOnline) {
 // --- Game Logic ---
 const BIRD = { x: 100, y: 150, radius: 15, gravity: 0.4, lift: -7, velocity: 0,
     draw() { ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI); ctx.fillStyle = "#FFD700"; ctx.fill(); ctx.closePath(); },
-    update() { this.velocity += this.gravity; this.y += this.velocity; }
+    update() { this.velocity += this.gravity; this.y += this.velocity; },
+    flap() { this.velocity = this.lift; }
 };
 
 let PIPE = { gap: 200, width: 60, speed: 3,
@@ -370,7 +381,9 @@ window.addEventListener('resize', resizeCanvas);
 
 // Initialize
 window.onload = () => {
+    loadingMessage.textContent = '0. Window loaded. Applying settings...';
     loadSettings();
     showScreen('loading');
 };
+
 
