@@ -380,15 +380,5 @@ window.onload = () => {
     showScreen('loading');
     initializeSocketConnection();
 };
-```
 
-### **Step 2: Deploy and Report the Message**
-
-1.  Replace the code in your local `server.js`, `public/index.html`, and `public/client.js` files.
-2.  Push the changes to GitHub using the force push command:
-    ```bash
-    git add .
-    git commit -m "Add robust debugging for blank screen"
-    git push --force origin main
-    
 
