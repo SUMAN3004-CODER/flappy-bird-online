@@ -380,5 +380,3 @@ window.onload = () => {
     showScreen('loading');
     initializeSocketConnection();
 };
-
-
