@@ -1,9 +1,24 @@
 // --- Establish connection to the server ---
 const loadingMessage = document.getElementById('loading-message');
-loadingMessage.textContent = '1. Client.js script started.';
 
-const socket = io();
-loadingMessage.textContent = '2. Connecting to server...';
+// --- CRITICAL DEBUGGING STEP ---
+// This code runs immediately. If you don't see this message, the client.js file itself is not loading.
+loadingMessage.textContent = '1. client.js script has started.';
+
+// This function will now check if the core Socket.IO library loaded correctly.
+function initializeSocketConnection() {
+    if (typeof io === 'undefined') {
+        // This is the most likely error. It means socket.io.js failed to load from the server.
+        loadingMessage.textContent = 'FATAL ERROR: Socket.IO library (io) not found. Check server logs and Network tab for 404 errors on socket.io.js.';
+        return; // Stop execution
+    }
+
+    loadingMessage.textContent = '2. Socket.IO library found. Connecting to server...';
+    const socket = io();
+    
+    // Attach all socket event listeners inside this function
+    setupSocketListeners(socket);
+}
 
 
 // --- Game State & Settings ---
@@ -46,10 +61,8 @@ function loadSettings() {
     const saved = localStorage.getItem('flappyBirdSettings');
     if (saved) {
         gameSettings = JSON.parse(saved);
-        // Apply settings
         document.getElementById('dark-mode-toggle').checked = gameSettings.darkMode;
         document.body.classList.toggle('dark-mode', gameSettings.darkMode);
-        
         const jumpSlider = document.getElementById('jump-level-slider');
         jumpSlider.value = gameSettings.jumpLevel;
         updateJumpLevelDisplay(gameSettings.jumpLevel);
@@ -65,71 +78,82 @@ function updateJumpLevelDisplay(value) {
 }
 
 // --- Socket.IO Event Listeners ---
-socket.on('connect', () => {
-    loadingMessage.textContent = '3. Connected! Checking authentication...';
-    fetch('/api/user').then(res => res.json()).then(user => {
-        loadingMessage.textContent = '4. Auth check complete.';
-        if (user && user._id) {
-            currentUser = user;
-            if (!user.customUsername) {
-                document.getElementById('username-modal').style.display = 'flex';
+function setupSocketListeners(socket) {
+    socket.on('connect', () => {
+        loadingMessage.textContent = '3. Connected to server! Checking authentication...';
+        fetch('/api/user').then(res => res.json()).then(user => {
+            loadingMessage.textContent = '4. Auth check complete.';
+            if (user && user._id) {
+                currentUser = user;
+                if (!user.customUsername) {
+                    document.getElementById('username-modal').style.display = 'flex';
+                } else {
+                    showMainMenu();
+                }
             } else {
-                showMainMenu();
+                showScreen('login');
             }
-        } else {
-            showScreen('login');
-        }
-        screens.loading.classList.remove('active');
-    }).catch((err) => {
-        loadingMessage.textContent = 'ERROR: Authentication failed. Check Render logs and Environment Variables.';
-        console.error("Auth fetch failed:", err);
+        }).catch((err) => {
+            loadingMessage.textContent = 'ERROR: Authentication failed. This usually means your Environment Variables on Render are incorrect or the server crashed. Check the Render logs.';
+            console.error("Auth fetch failed:", err);
+        });
     });
-});
 
-socket.on('loginSuccess', (user) => {
-    currentUser = user;
-    showMainMenu();
-});
+    socket.on('loginSuccess', (user) => {
+        currentUser = user;
+        showMainMenu();
+    });
 
-socket.on('inviteReceived', ({ fromId, fromName }) => {
-    const modal = document.getElementById('invite-modal');
-    document.getElementById('invite-from-text').textContent = `${fromName} has invited you to play!`;
-    modal.style.display = 'flex';
-    document.getElementById('accept-invite-btn').onclick = () => {
-        socket.emit('acceptInvite', fromId);
-        modal.style.display = 'none';
-    };
-    document.getElementById('decline-invite-btn').onclick = () => modal.style.display = 'none';
-});
+    socket.on('inviteReceived', ({ fromId, fromName }) => {
+        const modal = document.getElementById('invite-modal');
+        document.getElementById('invite-from-text').textContent = `${fromName} has invited you to play!`;
+        modal.style.display = 'flex';
+        document.getElementById('accept-invite-btn').onclick = () => {
+            socket.emit('acceptInvite', fromId);
+            modal.style.display = 'none';
+        };
+        document.getElementById('decline-invite-btn').onclick = () => modal.style.display = 'none';
+    });
 
-socket.on('showDifficultySelect', ({ gameId }) => {
-    currentGameState.gameId = gameId;
-    document.getElementById('difficulty-modal').style.display = 'flex';
-    document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty!';
-});
+    socket.on('showDifficultySelect', ({ gameId }) => {
+        currentGameState.gameId = gameId;
+        document.getElementById('difficulty-modal').style.display = 'flex';
+        document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty!';
+    });
 
-socket.on('updateDifficultyChoices', ({ myChoice, opponentChoice, opponentName }) => {
-    const text = `You: ${myChoice || '...'} | ${opponentName}: ${opponentChoice || '...'}`;
-    document.getElementById('difficulty-status-text').textContent = text;
-});
+    socket.on('updateDifficultyChoices', ({ myChoice, opponentChoice, opponentName }) => {
+        const text = `You: ${myChoice || '...'} | ${opponentName}: ${opponentChoice || '...'}`;
+        document.getElementById('difficulty-status-text').textContent = text;
+    });
 
-socket.on('gameStart', ({ gameId, opponentName, difficulty }) => {
-    document.getElementById('difficulty-modal').style.display = 'none';
-    startMultiplayerGame(gameId, opponentName, difficulty);
-});
+    socket.on('gameStart', ({ gameId, opponentName, difficulty }) => {
+        document.getElementById('difficulty-modal').style.display = 'none';
+        startMultiplayerGame(gameId, opponentName, difficulty);
+    });
 
-socket.on('opponentScoreUpdate', score => document.getElementById('opponent-score').textContent = score);
-socket.on('friendAdded', friend => addFriendToList(friend, true));
-socket.on('friendsList', ({ friends, onlineFriendIds }) => {
-    document.getElementById('friends-list').innerHTML = '';
-    friends.forEach(friend => addFriendToList(friend, onlineFriendIds.includes(friend._id.toString())));
-});
-socket.on('leaderboards', ({ singlePlayer, multiPlayer }) => {
-    const spList = document.getElementById('single-player-leaderboard');
-    spList.innerHTML = singlePlayer.map(s => `<li>${s.username}: ${s.score}</li>`).join('') || '<li>No scores yet.</li>';
-    const mpList = document.getElementById('multiplayer-leaderboard');
-    mpList.innerHTML = multiPlayer.map(p => `<li>${p.customUsername}: ${p.wins} wins</li>`).join('') || '<li>No wins yet.</li>';
-});
+    socket.on('opponentScoreUpdate', score => {
+        if (document.getElementById('opponent-score')) {
+            document.getElementById('opponent-score').textContent = score
+        }
+    });
+
+    socket.on('friendAdded', friend => addFriendToList(friend, true));
+
+    socket.on('friendsList', ({ friends, onlineFriendIds }) => {
+        const list = document.getElementById('friends-list');
+        if (!list) return;
+        list.innerHTML = '';
+        friends.forEach(friend => addFriendToList(friend, onlineFriendIds.includes(friend._id.toString())));
+    });
+
+    socket.on('leaderboards', ({ singlePlayer, multiPlayer }) => {
+        const spList = document.getElementById('single-player-leaderboard');
+        if (spList) spList.innerHTML = singlePlayer.map(s => `<li>${s.username}: ${s.score}</li>`).join('') || '<li>No scores yet.</li>';
+        const mpList = document.getElementById('multiplayer-leaderboard');
+        if (mpList) mpList.innerHTML = multiPlayer.map(p => `<li>${p.customUsername}: ${p.wins} wins</li>`).join('') || '<li>No wins yet.</li>';
+    });
+}
+
 
 // --- Main Menu and Lobby Logic ---
 function showMainMenu() {
@@ -229,11 +253,9 @@ function beginGameCountdown() {
     resetGameState();
     showScreen('game');
     resizeCanvas();
-    currentGameState.bird.draw(); // Draw the initial bird
-    
+    currentGameState.bird.draw();
     countdownOverlay.textContent = currentGameState.countdown;
     countdownOverlay.style.display = 'flex';
-
     const countdownInterval = setInterval(() => {
         currentGameState.countdown--;
         if (currentGameState.countdown > 0) {
@@ -250,7 +272,6 @@ function beginGameCountdown() {
 document.getElementById('single-player-btn').addEventListener('click', () => {
     currentGameState.mode = 'single';
     document.getElementById('opponent-score-display').classList.add('hidden');
-    // For single player, we get difficulty from settings, but for simplicity, we use the difficulty modal here too.
     document.getElementById('difficulty-modal').style.display = 'flex';
     document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty for this round!';
 });
@@ -286,65 +307,40 @@ function gameLoop() {
         stopGame();
         return;
     }
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Only update bird if game has started
-    if (currentGameState.gameStarted) {
-        currentGameState.bird.update();
-    }
-    
-    // Check for game over
-    if (currentGameState.bird.y + currentGameState.bird.radius > canvas.height || currentGameState.bird.y - currentGameState.bird.radius < 0) {
-        currentGameState.gameOver = true;
-    }
-    
-    // Pipes Logic
+    if (currentGameState.gameStarted) currentGameState.bird.update();
+    if (currentGameState.bird.y + currentGameState.bird.radius > canvas.height || currentGameState.bird.y - currentGameState.bird.radius < 0) currentGameState.gameOver = true;
     if (currentGameState.gameStarted) {
         if (currentGameState.frame % 100 === 0) {
             const top = Math.random() * (canvas.height - PIPE.gap - 100) + 50;
             const bottom = canvas.height - top - PIPE.gap;
             currentGameState.pipes.push({ x: canvas.width, top, bottom, passed: false });
         }
-
         for (let i = currentGameState.pipes.length - 1; i >= 0; i--) {
             let p = currentGameState.pipes[i];
             p.x -= PIPE.speed;
-
-            if (p.x + PIPE.width < 0) {
-                currentGameState.pipes.splice(i, 1);
-                continue;
-            }
-
+            if (p.x + PIPE.width < 0) { currentGameState.pipes.splice(i, 1); continue; }
             if (currentGameState.bird.x + currentGameState.bird.radius > p.x && currentGameState.bird.x - currentGameState.bird.radius < p.x + PIPE.width &&
                 (currentGameState.bird.y - currentGameState.bird.radius < p.top || currentGameState.bird.y + currentGameState.bird.radius > canvas.height - p.bottom)) {
                 currentGameState.gameOver = true;
             }
-
             if (!p.passed && p.x + PIPE.width < currentGameState.bird.x) {
                 currentGameState.score++;
                 p.passed = true;
                 document.getElementById('local-score').textContent = currentGameState.score;
-                if (currentGameState.mode === 'multi') {
-                    socket.emit('scoreUpdate', currentGameState.score);
-                }
+                if (currentGameState.mode === 'multi') socket.emit('scoreUpdate', currentGameState.score);
             }
             PIPE.draw(p);
         }
     }
-
     currentGameState.bird.draw();
     currentGameState.frame++;
     gameLoopId = requestAnimationFrame(gameLoop);
 }
 
 // --- Event Listeners & Initializers ---
-document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && !currentGameState.gameOver && gameLoopId) currentGameState.bird.flap();
-});
-canvas.addEventListener('click', () => {
-    if (!currentGameState.gameOver && gameLoopId) currentGameState.bird.flap();
-});
+document.addEventListener('keydown', e => { if (e.code === 'Space' && !currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
+canvas.addEventListener('click', () => { if (!currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
 document.getElementById('game-back-btn').addEventListener('click', () => { stopGame(); showScreen('main-menu'); });
 
 document.querySelectorAll('.difficulty-btn').forEach(button => {
@@ -376,14 +372,23 @@ function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 }
-
 window.addEventListener('resize', resizeCanvas);
 
 // Initialize
 window.onload = () => {
-    loadingMessage.textContent = '0. Window loaded. Applying settings...';
     loadSettings();
     showScreen('loading');
+    initializeSocketConnection();
 };
+```
 
+### **Step 2: Deploy and Report the Message**
+
+1.  Replace the code in your local `server.js`, `public/index.html`, and `public/client.js` files.
+2.  Push the changes to GitHub using the force push command:
+    ```bash
+    git add .
+    git commit -m "Add robust debugging for blank screen"
+    git push --force origin main
+    
 
