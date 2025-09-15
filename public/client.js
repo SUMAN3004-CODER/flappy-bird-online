@@ -81,7 +81,10 @@ function updateJumpLevelDisplay(value) {
 function setupSocketListeners(socket) {
     socket.on('connect', () => {
         loadingMessage.textContent = '3. Connected to server! Checking authentication...';
-        fetch('/api/user').then(res => res.json()).then(user => {
+        fetch('/api/user').then(res => {
+            if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+            return res.json();
+        }).then(user => {
             loadingMessage.textContent = '4. Auth check complete.';
             if (user && user._id) {
                 currentUser = user;
@@ -128,6 +131,7 @@ function setupSocketListeners(socket) {
 
     socket.on('gameStart', ({ gameId, opponentName, difficulty }) => {
         document.getElementById('difficulty-modal').style.display = 'none';
+        // CORRECTED LINE: Used opponentName directly from the event data.
         startMultiplayerGame(gameId, opponentName, difficulty);
     });
 
@@ -303,7 +307,7 @@ function gameLoop() {
             document.getElementById('game-over-text').textContent = "Game Over";
         }
         document.getElementById('game-over-message').style.display = 'flex';
-        socket.emit('gameOver', { score: currentGameState.score, mode: currentGameState.mode, won });
+        socket.emit('gameOver', { score: currentGameState.score, mode: currentGameState.mode, won: won, gameId: currentGameState.gameId });
         stopGame();
         return;
     }
@@ -380,3 +384,4 @@ window.onload = () => {
     showScreen('loading');
     initializeSocketConnection();
 };
+
