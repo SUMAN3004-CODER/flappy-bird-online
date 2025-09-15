@@ -1,27 +1,5 @@
-// --- Establish connection to the server ---
-const loadingMessage = document.getElementById('loading-message');
-
-// --- CRITICAL DEBUGGING STEP ---
-// This code runs immediately. If you don't see this message, the client.js file itself is not loading.
-loadingMessage.textContent = '1. client.js script has started.';
-
-// This function will now check if the core Socket.IO library loaded correctly.
-function initializeSocketConnection() {
-    if (typeof io === 'undefined') {
-        // This is the most likely error. It means socket.io.js failed to load from the server.
-        loadingMessage.textContent = 'FATAL ERROR: Socket.IO library (io) not found. Check server logs and Network tab for 404 errors on socket.io.js.';
-        return; // Stop execution
-    }
-
-    loadingMessage.textContent = '2. Socket.IO library found. Connecting to server...';
-    const socket = io();
-    
-    // Attach all socket event listeners inside this function
-    setupSocketListeners(socket);
-}
-
-
-// --- Game State & Settings ---
+// --- Global Variables ---
+let socket; // Will hold our connection to the server
 let gameLoopId;
 let currentUser = null;
 let currentGameState = {
@@ -35,16 +13,49 @@ let gameSettings = {
 };
 
 // --- UI Elements ---
-const screens = {
-    loading: document.getElementById('loading-screen'),
-    login: document.getElementById('login-screen'),
-    mainMenu: document.getElementById('main-menu-screen'),
-    multiplayerLobby: document.getElementById('multiplayer-lobby-screen'),
-    game: document.getElementById('game-screen'),
+// We define these here, but will get the elements after the page loads
+let screens = {};
+let canvas, ctx, countdownOverlay, loadingMessage;
+
+
+// --- Main Initialization Function ---
+// This function is the single entry point, called only when the page is fully loaded.
+window.onload = function() {
+    // 1. Get all HTML elements now that they exist
+    screens = {
+        loading: document.getElementById('loading-screen'),
+        login: document.getElementById('login-screen'),
+        mainMenu: document.getElementById('main-menu-screen'),
+        multiplayerLobby: document.getElementById('multiplayer-lobby-screen'),
+        game: document.getElementById('game-screen'),
+    };
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    countdownOverlay = document.getElementById('countdown-overlay');
+    loadingMessage = document.getElementById('loading-message');
+
+    // 2. Initial setup
+    loadingMessage.textContent = '1. Page loaded. Initializing...';
+    loadSettings();
+    showScreen('loading');
+    
+    // 3. Set up listeners that don't depend on the server
+    setupGeneralEventListeners();
+
+    // 4. Connect to the server
+    initializeSocketConnection();
 };
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const countdownOverlay = document.getElementById('countdown-overlay');
+
+
+function initializeSocketConnection() {
+    if (typeof io === 'undefined') {
+        loadingMessage.textContent = 'FATAL ERROR: Socket.IO library (io) not found. Check server logs.';
+        return;
+    }
+    loadingMessage.textContent = '2. Socket.IO library found. Connecting...';
+    socket = io();
+    setupSocketListeners(); // This sets up what happens WHEN server messages arrive
+}
 
 // --- Utility Functions ---
 function showScreen(screenName) {
@@ -77,15 +88,19 @@ function updateJumpLevelDisplay(value) {
     else display.textContent = 'Strong';
 }
 
-// --- Socket.IO Event Listeners ---
-function setupSocketListeners(socket) {
+// --- Event Listener Setup ---
+function setupSocketListeners() {
     socket.on('connect', () => {
-        loadingMessage.textContent = '3. Connected to server! Checking authentication...';
+        loadingMessage.textContent = '3. Connected! Checking authentication...';
+        // Now that we are connected, we can safely set up UI buttons that TALK to the server
+        setupServerActionListeners(); 
+        
         fetch('/api/user').then(res => {
             if (!res.ok) throw new Error(`Server responded with ${res.status}`);
             return res.json();
         }).then(user => {
             loadingMessage.textContent = '4. Auth check complete.';
+            screens.loading.classList.remove('active');
             if (user && user._id) {
                 currentUser = user;
                 if (!user.customUsername) {
@@ -97,7 +112,7 @@ function setupSocketListeners(socket) {
                 showScreen('login');
             }
         }).catch((err) => {
-            loadingMessage.textContent = 'ERROR: Authentication failed. This usually means your Environment Variables on Render are incorrect or the server crashed. Check the Render logs.';
+            loadingMessage.textContent = 'ERROR: Auth failed. Check Render Environment Variables & server logs.';
             console.error("Auth fetch failed:", err);
         });
     });
@@ -131,7 +146,6 @@ function setupSocketListeners(socket) {
 
     socket.on('gameStart', ({ gameId, opponentName, difficulty }) => {
         document.getElementById('difficulty-modal').style.display = 'none';
-        // CORRECTED LINE: Used opponentName directly from the event data.
         startMultiplayerGame(gameId, opponentName, difficulty);
     });
 
@@ -158,6 +172,84 @@ function setupSocketListeners(socket) {
     });
 }
 
+// This new function contains listeners that SEND messages to the server
+function setupServerActionListeners() {
+    document.getElementById('guest-login-btn').addEventListener('click', () => socket.emit('guestLogin'));
+
+    document.getElementById('set-username-btn').addEventListener('click', () => {
+        const username = document.getElementById('username-input').value.trim();
+        if (username && username.length > 2) {
+            socket.emit('setUsername', username);
+            document.getElementById('username-modal').style.display = 'none';
+        } else { alert('Username must be at least 3 characters.'); }
+    });
+    
+    document.getElementById('add-friend-btn').addEventListener('click', () => {
+        const friendId = document.getElementById('add-friend-input').value.trim();
+        if (friendId) socket.emit('addFriend', friendId);
+        document.getElementById('add-friend-input').value = '';
+    });
+
+    document.querySelectorAll('.difficulty-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const difficulty = e.target.dataset.difficulty;
+            if (currentGameState.mode === 'single') {
+                document.getElementById('difficulty-modal').style.display = 'none';
+                setDifficulty(difficulty);
+                beginGameCountdown();
+            } else {
+                socket.emit('difficultySelected', { gameId: currentGameState.gameId, difficulty });
+            }
+        });
+    });
+}
+
+// This new function contains listeners that DO NOT depend on the server
+function setupGeneralEventListeners() {
+    document.getElementById('multiplayer-btn').addEventListener('click', () => {
+        showScreen('multiplayer-lobby');
+        document.querySelector('.tab-btn[data-tab="friends"]').click();
+        socket.emit('getLeaderboards');
+        socket.emit('requestInitialData');
+    });
+
+    document.getElementById('lobby-back-btn').addEventListener('click', () => showScreen('main-menu'));
+    
+    document.querySelectorAll('.tab-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const tab = button.dataset.tab;
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`${tab}-tab`).classList.add('active');
+            button.classList.add('active');
+        });
+    });
+    
+    document.getElementById('single-player-btn').addEventListener('click', () => {
+        currentGameState.mode = 'single';
+        document.getElementById('opponent-score-display').classList.add('hidden');
+        document.getElementById('difficulty-modal').style.display = 'flex';
+        document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty for this round!';
+    });
+
+    document.addEventListener('keydown', e => { if (e.code === 'Space' && !currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
+    canvas.addEventListener('click', () => { if (!currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
+    document.getElementById('game-back-btn').addEventListener('click', () => { stopGame(); showScreen('main-menu'); });
+
+    document.getElementById('dark-mode-toggle').addEventListener('change', (e) => {
+        gameSettings.darkMode = e.target.checked;
+        document.body.classList.toggle('dark-mode', gameSettings.darkMode);
+        saveSettings();
+    });
+
+    document.getElementById('jump-level-slider').addEventListener('input', (e) => {
+        gameSettings.jumpLevel = e.target.value;
+        updateJumpLevelDisplay(e.target.value);
+        saveSettings();
+    });
+    
+    window.addEventListener('resize', resizeCanvas);
+}
 
 // --- Main Menu and Lobby Logic ---
 function showMainMenu() {
@@ -165,43 +257,6 @@ function showMainMenu() {
     document.getElementById('user-id-display').textContent = currentUser._id;
     showScreen('main-menu');
 }
-
-document.getElementById('guest-login-btn').addEventListener('click', () => socket.emit('guestLogin'));
-
-document.getElementById('set-username-btn').addEventListener('click', () => {
-    const username = document.getElementById('username-input').value.trim();
-    if (username && username.length > 2) {
-        socket.emit('setUsername', username);
-        document.getElementById('username-modal').style.display = 'none';
-    } else { alert('Username must be at least 3 characters.'); }
-});
-
-document.getElementById('multiplayer-btn').addEventListener('click', () => {
-    showScreen('multiplayer-lobby');
-    document.querySelector('.tab-btn[data-tab="friends"]').click();
-    socket.emit('getLeaderboards');
-    socket.emit('requestInitialData');
-});
-
-document.getElementById('lobby-back-btn').addEventListener('click', () => showScreen('main-menu'));
-
-// Tab Switching
-document.querySelectorAll('.tab-btn').forEach(button => {
-    button.addEventListener('click', () => {
-        const tab = button.dataset.tab;
-        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.getElementById(`${tab}-tab`).classList.add('active');
-        button.classList.add('active');
-    });
-});
-
-// --- Friends Logic ---
-document.getElementById('add-friend-btn').addEventListener('click', () => {
-    const friendId = document.getElementById('add-friend-input').value.trim();
-    if (friendId) socket.emit('addFriend', friendId);
-    document.getElementById('add-friend-input').value = '';
-});
 
 function addFriendToList(friend, isOnline) {
     const list = document.getElementById('friends-list');
@@ -273,13 +328,6 @@ function beginGameCountdown() {
     }, 1000);
 }
 
-document.getElementById('single-player-btn').addEventListener('click', () => {
-    currentGameState.mode = 'single';
-    document.getElementById('opponent-score-display').classList.add('hidden');
-    document.getElementById('difficulty-modal').style.display = 'flex';
-    document.getElementById('difficulty-status-text').textContent = 'Choose your difficulty for this round!';
-});
-
 function startMultiplayerGame(gameId, opponentName, difficulty) {
     currentGameState.mode = 'multi';
     currentGameState.gameId = gameId;
@@ -342,46 +390,8 @@ function gameLoop() {
     gameLoopId = requestAnimationFrame(gameLoop);
 }
 
-// --- Event Listeners & Initializers ---
-document.addEventListener('keydown', e => { if (e.code === 'Space' && !currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
-canvas.addEventListener('click', () => { if (!currentGameState.gameOver && gameLoopId) currentGameState.bird.flap(); });
-document.getElementById('game-back-btn').addEventListener('click', () => { stopGame(); showScreen('main-menu'); });
-
-document.querySelectorAll('.difficulty-btn').forEach(button => {
-    button.addEventListener('click', (e) => {
-        const difficulty = e.target.dataset.difficulty;
-        if (currentGameState.mode === 'single') {
-            document.getElementById('difficulty-modal').style.display = 'none';
-            setDifficulty(difficulty);
-            beginGameCountdown();
-        } else {
-            socket.emit('difficultySelected', { gameId: currentGameState.gameId, difficulty });
-        }
-    });
-});
-
-document.getElementById('dark-mode-toggle').addEventListener('change', (e) => {
-    gameSettings.darkMode = e.target.checked;
-    document.body.classList.toggle('dark-mode', gameSettings.darkMode);
-    saveSettings();
-});
-
-document.getElementById('jump-level-slider').addEventListener('input', (e) => {
-    gameSettings.jumpLevel = e.target.value;
-    updateJumpLevelDisplay(e.target.value);
-    saveSettings();
-});
-
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 }
-window.addEventListener('resize', resizeCanvas);
-
-// Initialize
-window.onload = () => {
-    loadSettings();
-    showScreen('loading');
-    initializeSocketConnection();
-};
 
